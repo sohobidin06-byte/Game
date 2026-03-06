@@ -1,1 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<title>3D Garden Drift - Centered</title>
+	<style>
+		body { margin: 0; overflow: hidden; background: #87ceeb; font-family: sans-serif; }
+		#ui { position: absolute; top: 10px; width: 100%; text-align: center; color: white; pointer-events: none; z-index: 5; }
+		#score { font-size: 50px; font-weight: 900; color: #f1c40f; text-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+		
+		/* Mobile Buttons - Balanced */
+		.controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-between; padding: 0 40px; box-sizing: border-box; z-index: 10; }
+		.btn { 
+			width: 70px; height: 70px; background: rgba(0,0,0,0.5); 
+			border: 2px solid white; border-radius: 50%; 
+			color: white; font-size: 24px; display: flex; align-items: center; 
+			justify-content: center; pointer-events: auto; user-select: none;
+		}
+		.btn:active { background: #e67e22; }
 
+		#gameOver { 
+			position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+			background: white; padding: 30px; border-radius: 15px;
+			text-align: center; display: none; z-index: 100; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+		}
+	</style>
+</head>
+<body>
+
+	<div id="ui">
+		<div id="score">0</div>
+	</div>
+
+	<div class="controls">
+		<div class="btn" id="leftBtn">L</div>
+		<div class="btn" id="midBtn">C</div>
+		<div class="btn" id="rightBtn">R</div>
+	</div>
+
+	<div id="gameOver">
+		<h1>CRASH!</h1>
+		<button onclick="location.reload()">RESTART</button>
+	</div>
+
+	<script type="importmap">
+		{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+	</script>
+
+	<script type="module">
+		import * as THREE from 'three';
+
+		// --- SCENE SETUP ---
+		const scene = new THREE.Scene();
+		scene.background = new THREE.Color(0x87ceeb);
+		scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
+
+		const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+		// Position camera exactly behind the center lane
+		camera.position.set(0, 5, 12); 
+
+		const renderer = new THREE.WebGLRenderer({ antialias: true });
+		renderer.setSize(window.innerWidth, window.innerHeight);
+		document.body.appendChild(renderer.domElement);
+
+		scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+		const sun = new THREE.DirectionalLight(0xffffff, 1);
+		sun.position.set(0, 20, 10); // Sun from above
+		scene.add(sun);
+
+		// --- GROUND & ROAD ---
+		// Road centered at X=0
+		const road = new THREE.Mesh(
+			new THREE.PlaneGeometry(10, 2000),
+			new THREE.MeshStandardMaterial({ color: 0x333333 })
+		);
+		road.rotation.x = -Math.PI / 2;
+		scene.add(road);
+
+		const grass = new THREE.Mesh(
+			new THREE.PlaneGeometry(100, 2000),
+			new THREE.MeshStandardMaterial({ color: 0x27ae60 })
+		);
+		grass.rotation.x = -Math.PI / 2;
+		grass.position.y = -0.05;
+		scene.add(grass);
+
+		// --- CAR BUILDER ---
+		function createCar(color) {
+			const car = new THREE.Group();
+			const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 3.2), new THREE.MeshStandardMaterial({color, metalness:0.5}));
+			body.position.y = 0.6;
+			const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 1.4), new THREE.MeshStandardMaterial({color: 0x111111}));
+			cabin.position.set(0, 1.1, 0.2);
+			car.add(body, cabin);
+			
+			// Wheels
+			const wGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 12);
+			const wMat = new THREE.MeshStandardMaterial({color: 0x000000});
+			[[0.85,0.4,1], [-0.85,0.4,1], [0.85,0.4,-1], [-0.85,0.4,-1]].forEach(p => {
+				const w = new THREE.Mesh(wGeo, wMat);
+				w.rotation.z = Math.PI/2;
+				w.position.set(...p);
+				car.add(w);
+			});
+			return car;
+		}
+
+		const player = createCar(0xe74c3c);
+		player.position.set(0, 0, 0); // Start at center
+		scene.add(player);
+
+		// --- GAME LOGIC ---
+		let targetX = 0;
+		let score = 0;
+		let speed = 0.7;
+		let isGameOver = false;
+		const enemies = [];
+
+		// Center-focused controls
+		document.getElementById('leftBtn').onclick = () => targetX = -3;
+		document.getElementById('midBtn').onclick = () => targetX = 0;
+		document.getElementById('rightBtn').onclick = () => targetX = 3;
+
+		function animate() {
+			if(isGameOver) return;
+			requestAnimationFrame(animate);
+
+			// Smooth centering movement
+			player.position.x += (targetX - player.position.x) * 0.1;
+			player.rotation.y = (player.position.x - targetX) * 0.05;
+
+			// Camera follows car but stays centered on road
+			camera.lookAt(player.position.x * 0.5, 1, 0);
+
+			// Enemies
+			if(Math.random() < 0.02) {
+				const en = createCar(0x3498db);
+				// Spawns in one of the 3 lanes: -3, 0, or 3
+				const lanes = [-3, 0, 3];
+				en.position.set(lanes[Math.floor(Math.random()*3)], 0, -80);
+				scene.add(en);
+				enemies.push(en);
+			}
+
+			enemies.forEach((en, i) => {
+				en.position.z += speed;
+				if(player.position.distanceTo(en.position) < 2.2) {
+					isGameOver = true;
+					document.getElementById('gameOver').style.display = 'block';
+				}
+				if(en.position.z > 20) {
+					scene.remove(en);
+					enemies.splice(i, 1);
+					score += 10;
+					document.getElementById('score').innerText = score;
+				}
+			});
+
+			renderer.render(scene, camera);
+		}
+		animate();
+
+		window.onresize = () => {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		};
+	</script>
+</body>
+</html>
+Шу кодди менга python ga kilip ber
